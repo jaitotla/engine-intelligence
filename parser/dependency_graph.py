@@ -151,8 +151,32 @@ if __name__ == "__main__":
 
     target = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
     graph = build_graph(target)
-    print_summary(graph)
 
-    out_path = Path("dependency_graph.json")
-    out_path.write_text(json.dumps(graph.to_json_dict(), indent=2))
-    print(f"\nFull graph written to {out_path}")
+    if len(graph.reports) == 0:
+        # Nothing found — tell the user WHY instead of silently printing zeros.
+        # Check what file types actually exist here, so they know if this is
+        # a real scope gap (e.g. a JS repo) or just a wrong path.
+        ext_counts: dict[str, int] = {}
+        for p in target.rglob("*"):
+            if p.is_file() and p.suffix:
+                ext_counts[p.suffix] = ext_counts.get(p.suffix, 0) + 1
+        top_exts = sorted(ext_counts.items(), key=lambda kv: -kv[1])[:5]
+
+        print(f"No .py files found under {target}")
+        if top_exts:
+            print("This repo's most common file types are:")
+            for ext, count in top_exts:
+                print(f"  {ext}  ({count} files)")
+            print(
+                "\nThis tool currently only analyzes Python (.py) files. "
+                "Support for other languages (via tree-sitter) is planned "
+                "but not yet built."
+            )
+        else:
+            print("No files with extensions found at all — check the path is correct.")
+    else:
+        print_summary(graph)
+
+        out_path = Path("dependency_graph.json")
+        out_path.write_text(json.dumps(graph.to_json_dict(), indent=2))
+        print(f"\nFull graph written to {out_path}")
