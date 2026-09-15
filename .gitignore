@@ -5,3 +5,4 @@ __pycache__/
 node_modules/
 dependency_graph.json
 .DS_Store
+debt_report.json
