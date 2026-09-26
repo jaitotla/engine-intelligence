@@ -43,7 +43,7 @@ def _run_git(repo_root: Path, args: list[str]) -> str:
 def mine_history(
     repo_root: Path,
     max_commits: int = 2000,
-    file_suffix: str = ".py",
+    file_suffixes: tuple[str, ...] = (".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"),
 ) -> ChurnReport:
     """
     Walks commit history and builds churn + co-change stats.
@@ -79,7 +79,7 @@ def mine_history(
             current_hash, current_date = meta.split("|", 1)
             current_files = []
         elif line.strip():
-            if line.endswith(file_suffix):
+            if line.endswith(file_suffixes):
                 current_files.append(line.strip())
     if current_hash is not None:
         commits.append((current_hash, current_date, current_files))

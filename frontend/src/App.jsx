@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import DependencyGraph from './DependencyGraph';
 import './index.css';
@@ -11,6 +11,40 @@ function riskDotColor(score, maxScore) {
   if (t < 0.33) return 'var(--risk-low)';
   if (t < 0.66) return 'var(--risk-mid)';
   return 'var(--risk-high)';
+}
+
+function InfoTip({ text }) {
+  const [pos, setPos] = useState(null);
+  const iconRef = useRef(null);
+
+  const show = () => {
+    const rect = iconRef.current.getBoundingClientRect();
+    const bubbleWidth = 220;
+    let left = rect.left + rect.width / 2 - bubbleWidth / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - bubbleWidth - 8));
+    const top = rect.bottom + 6;
+    setPos({ top, left });
+  };
+  const hide = () => setPos(null);
+
+  return (
+    <span
+      className="info-tip"
+      ref={iconRef}
+      tabIndex={0}
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+    >
+      <span className="info-tip-icon">i</span>
+      {pos && (
+        <span className="info-tip-bubble" style={{ top: pos.top, left: pos.left }}>
+          {text}
+        </span>
+      )}
+    </span>
+  );
 }
 
 export default function App() {
@@ -124,15 +158,24 @@ export default function App() {
             </div>
             <div className="stat">
               <span className="value">{data.summary.num_edges}</span>
-              <span className="label">edges</span>
+              <span className="label">
+                edges
+                <InfoTip text="Import relationships found between files — how many files depend on other files." />
+              </span>
             </div>
             <div className="stat">
               <span className="value">{data.summary.num_hotspots}</span>
-              <span className="label">hotspots</span>
+              <span className="label">
+                hotspots
+                <InfoTip text="Files with a nonzero risk score: complicated code (high complexity) that's also been changed frequently (high churn)." />
+              </span>
             </div>
             <div className="stat">
               <span className="value">{data.summary.num_boundary_violations}</span>
-              <span className="label">boundary issues</span>
+              <span className="label">
+                boundary issues
+                <InfoTip text="Cases where code in one architectural area (e.g. a module or package) directly depends on or changes alongside code in a different, supposedly separate area." />
+              </span>
             </div>
           </div>
         )}
@@ -140,7 +183,10 @@ export default function App() {
 
       <div className="body">
         <div className="sidebar">
-          <div className="section-header">Hotspots (complexity × churn)</div>
+          <div className="section-header">
+            Hotspots (complexity × churn)
+            <InfoTip text="Ranked by risk score = max function complexity × number of commits that touched the file. High score means the file is both hard to reason about and frequently modified — where bugs tend to cluster." />
+          </div>
           {error && <div className="detail-empty error-message">{error}</div>}
           {!data && !error && (
             <div className="detail-empty">Enter a local path to a git repo above and click Analyze.</div>
@@ -164,6 +210,7 @@ export default function App() {
             <div className="violations-bar">
               <div className="section-header" style={{ padding: 0, marginBottom: 8, border: 'none' }}>
                 Boundary violations
+                <InfoTip text="Cross-module coupling: code that's supposed to live in a self-contained area but directly depends on, or changes alongside, code in a different area." />
               </div>
               {data.boundary_violations.map((v, i) => (
                 <div key={i} className="violation-chip">
@@ -197,15 +244,24 @@ export default function App() {
               <div className="metric-grid">
                 <div className="metric-cell">
                   <span className="value">{selectedHotspot ? Math.round(selectedHotspot.score) : 0}</span>
-                  <span className="label">hotspot score</span>
+                  <span className="label">
+                    hotspot score
+                    <InfoTip text="Complexity × churn. Not a percentage or bounded scale — compare it against other files' scores in the list to judge relative risk." />
+                  </span>
                 </div>
                 <div className="metric-cell">
                   <span className="value">{selectedNode.complexity}</span>
-                  <span className="label">max complexity</span>
+                  <span className="label">
+                    max complexity
+                    <InfoTip text="Cyclomatic complexity of this file's most complicated function — counts branching logic (if/for/while/try). Higher means harder to mentally trace through." />
+                  </span>
                 </div>
                 <div className="metric-cell">
                   <span className="value">{selectedNode.churn}</span>
-                  <span className="label">commits touched</span>
+                  <span className="label">
+                    commits touched
+                    <InfoTip text="How many separate commits modified this file. High churn means the file is actively evolving or frequently patched." />
+                  </span>
                 </div>
                 <div className="metric-cell">
                   <span className="value">{selectedNode.loc}</span>
@@ -258,7 +314,10 @@ export default function App() {
 
               {connectedCoupling.length > 0 && (
                 <>
-                  <div className="section-header">Hidden coupling (change together, no import link)</div>
+                  <div className="section-header">
+                    Hidden coupling (change together, no import link)
+                    <InfoTip text="Files that were modified in the same commits repeatedly, even though neither imports the other. This reveals implicit dependencies the code itself doesn't show." />
+                  </div>
                   <div className="detail-list">
                     {connectedCoupling.map((c, i) => {
                       const other = c.file_a === selectedPath ? c.file_b : c.file_a;

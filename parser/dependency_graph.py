@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ast_parser import FileReport, parse_repo
+from js_parser import parse_repo as parse_js_repo
+from js_resolver import resolve_js_import
 
 
 @dataclass
@@ -125,6 +127,30 @@ def build_graph(repo_root: Path) -> DependencyGraph:
                 graph.reverse_edges[resolved_file].add(report.path)
             # else: external dependency (e.g. "numpy") — not tracked in the graph
 
+    # --- JS/TS files: separate parsing + resolution, merged into the same graph ---
+    js_reports = parse_js_repo(repo_root)
+    for js_report in js_reports:
+        if js_report.parse_error:
+            continue
+        graph.reports[js_report.path] = js_report
+        graph.edges.setdefault(js_report.path, set())
+        graph.reverse_edges.setdefault(js_report.path, set())
+
+    for js_report in js_reports:
+        if js_report.parse_error:
+            continue
+        file_path = Path(js_report.path)
+        for spec in js_report.imports:
+            resolved = resolve_js_import(spec, file_path, repo_root)
+            if resolved is None:
+                continue  # external package, not tracked
+            resolved_str = str(resolved)
+            if resolved_str not in graph.reports:
+                continue  # resolved to a file we didn't parse (shouldn't normally happen)
+            if resolved_str != js_report.path:
+                graph.edges[js_report.path].add(resolved_str)
+                graph.reverse_edges[resolved_str].add(js_report.path)
+
     return graph
 
 
@@ -162,13 +188,13 @@ if __name__ == "__main__":
                 ext_counts[p.suffix] = ext_counts.get(p.suffix, 0) + 1
         top_exts = sorted(ext_counts.items(), key=lambda kv: -kv[1])[:5]
 
-        print(f"No .py files found under {target}")
+        print(f"No supported files (.py, .js, .jsx, .ts, .tsx) found under {target}")
         if top_exts:
             print("This repo's most common file types are:")
             for ext, count in top_exts:
                 print(f"  {ext}  ({count} files)")
             print(
-                "\nThis tool currently only analyzes Python (.py) files. "
+                "\nThis tool currently only analyzes Python, JS, JSX, TS, and TSX files. "
                 "Support for other languages (via tree-sitter) is planned "
                 "but not yet built."
             )

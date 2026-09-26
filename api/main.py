@@ -47,7 +47,7 @@ def analyze(req: AnalyzeRequest):
     if len(graph.reports) == 0:
         raise HTTPException(
             status_code=400,
-            detail=f"No .py files found under {repo_root}. Only Python repos are supported currently.",
+            detail=f"No supported files (.py, .js, .jsx, .ts, .tsx) found under {repo_root}.",
         )
 
     debt = score_repo(repo_root, max_commits=req.max_commits)
