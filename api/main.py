@@ -1,6 +1,5 @@
 """
-Phase 4 backend: exposes the Phase 1-3 analysis pipeline over HTTP so the
-React frontend can request an analysis and render it interactively.
+Phase 4/5 backend.
 """
 
 import os
@@ -21,7 +20,6 @@ from score import score_repo, _to_repo_relative  # noqa: E402
 
 app = FastAPI(title="Engine Intelligence API")
 
-# Vite's dev server runs on 5173 by default — allow it to call this API locally.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -33,6 +31,7 @@ app.add_middleware(
 class AnalyzeRequest(BaseModel):
     repo_path: str
     max_commits: int = 2000
+    exclude_dirs: list[str] = []
 
 
 @app.post("/api/analyze")
@@ -43,17 +42,17 @@ def analyze(req: AnalyzeRequest):
     if not (repo_root / ".git").exists():
         raise HTTPException(status_code=400, detail=f"Not a git repository: {repo_root}")
 
-    graph = build_graph(repo_root)
+    exclude_set = set(d.strip() for d in req.exclude_dirs if d.strip())
+
+    graph = build_graph(repo_root, exclude_dirs=exclude_set)
     if len(graph.reports) == 0:
         raise HTTPException(
             status_code=400,
             detail=f"No supported files (.py, .js, .jsx, .ts, .tsx) found under {repo_root}.",
         )
 
-    debt = score_repo(repo_root, max_commits=req.max_commits)
+    debt = score_repo(repo_root, max_commits=req.max_commits, exclude_dirs=exclude_set)
 
-    # Build the graph payload, with relative paths so it lines up with the
-    # hotspot/coupling data (which already uses repo-relative paths)
     hotspot_by_path = {fs.path: fs for fs in debt.file_scores}
 
     nodes = []
@@ -116,9 +115,9 @@ class ExplainRequest(BaseModel):
     num_functions: int
     depends_on: list[str]
     depended_on_by: list[str]
-    hidden_coupling: list[str]  # e.g. ["other_file.py (12x)"]
-    provider: str = "ollama"     # "ollama" (free, local) or "anthropic" (paid, higher quality)
-    model: str = "qwen2.5:7b"    # only used when provider == "ollama"
+    hidden_coupling: list[str]
+    provider: str = "ollama"
+    model: str = "qwen2.5:7b"
 
 
 EXPLAIN_SYSTEM_PROMPT = """You are explaining a code-risk report to a new engineer joining this project.
@@ -131,15 +130,11 @@ source code.
 STRICT RULES:
 - Only reason from the numbers given. Never claim to know what the code does,
   what bugs it might have, or why it was written a certain way — you cannot see it.
-- Do not invent specifics (no "this file probably handles authentication" or
-  similar guesses about content/purpose).
+- Do not invent specifics.
 - Explain what the MEASUREMENTS mean and why they matter for someone about to
-  work in this codebase: what "high complexity" and "high churn" together imply
-  about risk, what the dependency counts imply about blast radius, what hidden
-  coupling implies about undocumented relationships.
-- Keep it to 3-5 sentences. Plain, direct language — no hedging filler.
-- If a number is unremarkable (e.g. zero coupling, low complexity), say so
-  plainly rather than manufacturing concern.
+  work in this codebase.
+- Keep it to 3-5 sentences. Plain, direct language.
+- If a number is unremarkable, say so plainly rather than manufacturing concern.
 """
 
 
@@ -199,7 +194,7 @@ Number of functions: {req.num_functions}
 
 Depends on {len(req.depends_on)} files: {', '.join(req.depends_on) or 'none'}
 Depended on by {len(req.depended_on_by)} files: {', '.join(req.depended_on_by) or 'none'}
-Hidden coupling (changes together with, but no import relationship): {', '.join(req.hidden_coupling) or 'none'}
+Hidden coupling: {', '.join(req.hidden_coupling) or 'none'}
 """
 
     if req.provider == "ollama":

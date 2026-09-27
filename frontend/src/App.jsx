@@ -22,8 +22,15 @@ function InfoTip({ text }) {
     const bubbleWidth = 220;
     let left = rect.left + rect.width / 2 - bubbleWidth / 2;
     left = Math.max(8, Math.min(left, window.innerWidth - bubbleWidth - 8));
-    const top = rect.bottom + 6;
-    setPos({ top, left });
+
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const preferAbove = spaceBelow < 120; // rough min space a short tooltip needs below
+
+    if (preferAbove) {
+      setPos({ anchor: 'bottom', bottom: window.innerHeight - rect.top + 6, left });
+    } else {
+      setPos({ anchor: 'top', top: rect.bottom + 6, left });
+    }
   };
   const hide = () => setPos(null);
 
@@ -39,7 +46,14 @@ function InfoTip({ text }) {
     >
       <span className="info-tip-icon">i</span>
       {pos && (
-        <span className="info-tip-bubble" style={{ top: pos.top, left: pos.left }}>
+        <span
+          className="info-tip-bubble"
+          style={
+            pos.anchor === 'bottom'
+              ? { bottom: pos.bottom, left: pos.left }
+              : { top: pos.top, left: pos.left }
+          }
+        >
           {text}
         </span>
       )}
@@ -49,6 +63,7 @@ function InfoTip({ text }) {
 
 export default function App() {
   const [repoPath, setRepoPath] = useState('');
+  const [excludeDirs, setExcludeDirs] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -57,6 +72,7 @@ export default function App() {
   const [explaining, setExplaining] = useState(false);
   const [explainError, setExplainError] = useState(null);
   const [provider, setProvider] = useState('ollama');
+  const [filterQuery, setFilterQuery] = useState('');
 
   const handleAnalyze = async (e) => {
     e.preventDefault();
@@ -64,11 +80,16 @@ export default function App() {
     setLoading(true);
     setError(null);
     setSelectedPath(null);
+    setFilterQuery('');
     try {
+      const excludeList = excludeDirs
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
       const res = await fetch(`${API_URL}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo_path: repoPath }),
+        body: JSON.stringify({ repo_path: repoPath, exclude_dirs: excludeList }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.detail || 'Analysis failed');
@@ -85,6 +106,21 @@ export default function App() {
     setExplanation(null);
     setExplainError(null);
   }, []);
+
+  const maxScore = data ? Math.max(...data.hotspots.map((h) => h.score), 1) : 1;
+  const selectedNode = data?.graph.nodes.find((n) => n.id === selectedPath);
+  const selectedHotspot = data?.hotspots.find((h) => h.path === selectedPath);
+
+  const connectedCoupling = data
+    ? data.hidden_coupling.filter((c) => c.file_a === selectedPath || c.file_b === selectedPath)
+    : [];
+
+  const incoming = data
+    ? data.graph.edges.filter((e) => e.target === selectedPath).map((e) => e.source)
+    : [];
+  const outgoing = data
+    ? data.graph.edges.filter((e) => e.source === selectedPath).map((e) => e.target)
+    : [];
 
   const handleExplain = async () => {
     if (!selectedNode) return;
@@ -120,31 +156,27 @@ export default function App() {
     }
   };
 
-  const maxScore = data ? Math.max(...data.hotspots.map((h) => h.score), 1) : 1;
-  const selectedNode = data?.graph.nodes.find((n) => n.id === selectedPath);
-  const selectedHotspot = data?.hotspots.find((h) => h.path === selectedPath);
-
-  const connectedCoupling = data
-    ? data.hidden_coupling.filter((c) => c.file_a === selectedPath || c.file_b === selectedPath)
-    : [];
-
-  const incoming = data
-    ? data.graph.edges.filter((e) => e.target === selectedPath).map((e) => e.source)
-    : [];
-  const outgoing = data
-    ? data.graph.edges.filter((e) => e.source === selectedPath).map((e) => e.target)
+  const filteredHotspots = data
+    ? data.hotspots.filter((h) => h.path.toLowerCase().includes(filterQuery.toLowerCase()))
     : [];
 
   return (
     <div className="app">
       <div className="header">
         <h1>Engine Intelligence</h1>
-        <form onSubmit={handleAnalyze}>
+        <form onSubmit={handleAnalyze} className="analyze-form">
           <input
             type="text"
             placeholder="/path/to/repo"
             value={repoPath}
             onChange={(e) => setRepoPath(e.target.value)}
+          />
+          <input
+            type="text"
+            placeholder="exclude folders (comma-separated)"
+            value={excludeDirs}
+            onChange={(e) => setExcludeDirs(e.target.value)}
+            className="exclude-input"
           />
           <button type="submit" disabled={loading}>
             {loading ? 'Analyzing…' : 'Analyze'}
@@ -174,7 +206,7 @@ export default function App() {
               <span className="value">{data.summary.num_boundary_violations}</span>
               <span className="label">
                 boundary issues
-                <InfoTip text="Cases where code in one architectural area (e.g. a module or package) directly depends on or changes alongside code in a different, supposedly separate area." />
+                <InfoTip text="Cases where code in one architectural area directly depends on or changes alongside code in a different, supposedly separate area." />
               </span>
             </div>
           </div>
@@ -185,15 +217,25 @@ export default function App() {
         <div className="sidebar">
           <div className="section-header">
             Hotspots (complexity × churn)
-            <InfoTip text="Ranked by risk score = max function complexity × number of commits that touched the file. High score means the file is both hard to reason about and frequently modified — where bugs tend to cluster." />
+            <InfoTip text="Ranked by risk score = max function complexity × number of commits that touched the file." />
           </div>
+          {data && (
+            <div className="filter-box">
+              <input
+                type="text"
+                placeholder="Filter files…"
+                value={filterQuery}
+                onChange={(e) => setFilterQuery(e.target.value)}
+              />
+            </div>
+          )}
           {error && <div className="detail-empty error-message">{error}</div>}
           {!data && !error && (
             <div className="detail-empty">Enter a local path to a git repo above and click Analyze.</div>
           )}
           {data && (
             <div className="hotspot-list">
-              {data.hotspots.map((h) => (
+              {filteredHotspots.map((h) => (
                 <div
                   key={h.path}
                   className={`hotspot-row ${h.path === selectedPath ? 'selected' : ''}`}
@@ -204,6 +246,9 @@ export default function App() {
                   <span className="hotspot-score">{Math.round(h.score)}</span>
                 </div>
               ))}
+              {filteredHotspots.length === 0 && (
+                <div className="detail-empty">No files match "{filterQuery}"</div>
+              )}
             </div>
           )}
           {data && data.boundary_violations.length > 0 && (
@@ -246,21 +291,21 @@ export default function App() {
                   <span className="value">{selectedHotspot ? Math.round(selectedHotspot.score) : 0}</span>
                   <span className="label">
                     hotspot score
-                    <InfoTip text="Complexity × churn. Not a percentage or bounded scale — compare it against other files' scores in the list to judge relative risk." />
+                    <InfoTip text="Complexity × churn. Compare against other files' scores to judge relative risk." />
                   </span>
                 </div>
                 <div className="metric-cell">
                   <span className="value">{selectedNode.complexity}</span>
                   <span className="label">
                     max complexity
-                    <InfoTip text="Cyclomatic complexity of this file's most complicated function — counts branching logic (if/for/while/try). Higher means harder to mentally trace through." />
+                    <InfoTip text="Cyclomatic complexity of this file's most complicated function." />
                   </span>
                 </div>
                 <div className="metric-cell">
                   <span className="value">{selectedNode.churn}</span>
                   <span className="label">
                     commits touched
-                    <InfoTip text="How many separate commits modified this file. High churn means the file is actively evolving or frequently patched." />
+                    <InfoTip text="How many separate commits modified this file." />
                   </span>
                 </div>
                 <div className="metric-cell">
@@ -316,7 +361,7 @@ export default function App() {
                 <>
                   <div className="section-header">
                     Hidden coupling (change together, no import link)
-                    <InfoTip text="Files that were modified in the same commits repeatedly, even though neither imports the other. This reveals implicit dependencies the code itself doesn't show." />
+                    <InfoTip text="Files that were modified in the same commits repeatedly, even though neither imports the other." />
                   </div>
                   <div className="detail-list">
                     {connectedCoupling.map((c, i) => {
