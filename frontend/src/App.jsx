@@ -243,7 +243,7 @@ export default function App() {
           />
           <input
             type="text"
-            placeholder="exclude folders (comma-separated)"
+            placeholder="exclude paths (comma-separated)"
             value={excludeDirs}
             onChange={(e) => setExcludeDirs(e.target.value)}
             className="exclude-input"
