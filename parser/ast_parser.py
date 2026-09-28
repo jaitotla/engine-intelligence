@@ -1,14 +1,5 @@
 """
 Core AST parser for Python source files.
-
-Extracts, per file:
-- imports (what this file depends on)
-- top-level functions and classes (with basic complexity signals)
-- lines of code
-
-This is the foundation for the dependency graph: once every file reports
-"what it imports," we can resolve those imports to other files in the
-same repo and build a graph.
 """
 
 import ast
@@ -21,7 +12,8 @@ class FunctionInfo:
     name: str
     lineno: int
     end_lineno: int
-    complexity: int  # cyclomatic complexity (branch count + 1)
+    complexity: int
+    class_name: str | None = None  # None if a top-level function, else its enclosing class
 
     @property
     def length(self) -> int:
@@ -30,15 +22,15 @@ class FunctionInfo:
 
 @dataclass
 class FromImport:
-    module: str | None   # None for "from . import x" (pure relative, no module name)
-    level: int            # 0 = absolute, 1 = ".", 2 = "..", etc.
-    names: list[str] = field(default_factory=list)  # imported names, needed when module is None
+    module: str | None
+    level: int
+    names: list[str] = field(default_factory=list)
 
 
 @dataclass
 class FileReport:
     path: str
-    imports: list[str] = field(default_factory=list)          # "import x" / "import x.y"
+    imports: list[str] = field(default_factory=list)
     from_imports: list[FromImport] = field(default_factory=list)
     functions: list[FunctionInfo] = field(default_factory=list)
     classes: list[str] = field(default_factory=list)
@@ -47,16 +39,14 @@ class FileReport:
 
 
 class ComplexityVisitor(ast.NodeVisitor):
-    """Counts branching constructs to approximate cyclomatic complexity."""
-
     BRANCH_NODES = (
         ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try,
         ast.ExceptHandler, ast.With, ast.AsyncWith,
-        ast.BoolOp,  # and/or short-circuits count as branches
+        ast.BoolOp,
     )
 
     def __init__(self):
-        self.count = 1  # base complexity
+        self.count = 1
 
     def generic_visit(self, node):
         if isinstance(node, self.BRANCH_NODES):
@@ -98,18 +88,30 @@ def parse_file(path: Path) -> FileReport:
                     names=[alias.name for alias in node.names],
                 )
             )
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            # only count top-level-ish defs to avoid double counting nested helpers heavily
-            report.functions.append(
-                FunctionInfo(
-                    name=node.name,
-                    lineno=node.lineno,
-                    end_lineno=getattr(node, "end_lineno", node.lineno),
-                    complexity=_complexity_of(node),
+
+    def _process_body(body, class_name=None):
+        """Walks top-level statements only, tracking which class (if any)
+        directly contains each function — so 'Contents' can group methods
+        under their class instead of a flat, unordered list. Deeply nested
+        functions (closures inside functions) are intentionally not listed
+        as separate symbols; their complexity still folds into their
+        parent's count via ComplexityVisitor's full recursive walk."""
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                report.functions.append(
+                    FunctionInfo(
+                        name=node.name,
+                        lineno=node.lineno,
+                        end_lineno=getattr(node, "end_lineno", node.lineno),
+                        complexity=_complexity_of(node),
+                        class_name=class_name,
+                    )
                 )
-            )
-        elif isinstance(node, ast.ClassDef):
-            report.classes.append(node.name)
+            elif isinstance(node, ast.ClassDef):
+                report.classes.append(node.name)
+                _process_body(node.body, class_name=node.name)
+
+    _process_body(tree.body)
 
     return report
 
@@ -129,14 +131,7 @@ def parse_repo(repo_root: Path, ignore_dirs: set[str] | None = None) -> list[Fil
 
 if __name__ == "__main__":
     import sys
-    import json
 
     target = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
     reports = parse_repo(target)
     print(f"Parsed {len(reports)} files under {target}")
-    errors = [r for r in reports if r.parse_error]
-    if errors:
-        print(f"  {len(errors)} files had parse errors")
-    total_funcs = sum(len(r.functions) for r in reports)
-    total_loc = sum(r.loc for r in reports)
-    print(f"  {total_funcs} functions found, {total_loc} total lines")

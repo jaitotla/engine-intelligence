@@ -169,6 +169,85 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.tab-switcher {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-switcher button {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 10px 8px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.tab-switcher button:hover {
+  color: var(--text);
+}
+
+.tab-switcher button.tab-active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.reading-order-list {
+  padding: 4px 0;
+}
+
+.reading-order-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 16px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.reading-order-row:hover { background: var(--panel-raised); }
+
+.reading-order-row.selected {
+  background: var(--panel-raised);
+  border-left-color: var(--accent);
+}
+
+.reading-order-row.in-cycle {
+  opacity: 0.85;
+}
+
+.reading-order-position {
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--text-faint);
+  width: 20px;
+  flex-shrink: 0;
+  text-align: right;
+  padding-top: 1px;
+}
+
+.reading-order-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reading-order-body .hotspot-path {
+  white-space: normal;
+  word-break: break-all;
+}
+
+.reading-order-reason {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
 .filter-box {
   padding: 8px 16px;
   border-bottom: 1px solid var(--border);
@@ -423,6 +502,53 @@ body {
   margin-top: 8px;
   font-size: 12px;
   color: var(--risk-high);
+}
+
+.show-more-btn {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  border-top: 1px dashed var(--border);
+  color: var(--accent);
+  font-family: var(--font-data);
+  font-size: 11px;
+  padding: 6px 0 2px;
+  margin-top: 2px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.show-more-btn:hover {
+  color: var(--text);
+}
+
+.contents-method {
+  padding-left: 16px;
+  color: var(--text-muted);
+}
+
+.contents-class {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.contents-complexity {
+  color: var(--risk-mid);
+}
+
+.truncated-tag {
+  display: inline-block;
+  font-family: var(--font-data);
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--risk-mid);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  margin-left: 6px;
+  margin-bottom: 8px;
 }
 
 .detail-list {

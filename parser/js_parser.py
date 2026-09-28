@@ -1,11 +1,5 @@
 """
 JavaScript/TypeScript parser using tree-sitter.
-
-Mirrors ast_parser.py's FileReport shape so the rest of the pipeline
-(dependency_graph, git_history, score) can treat JS/TS files the same
-way as Python files, with one key difference: JS import resolution is
-filesystem-path-based (./foo, ../bar) rather than dotted-module-based,
-so resolution happens separately in dependency_graph.py.
 """
 
 import warnings
@@ -40,13 +34,15 @@ def _parser_for(path: Path):
 class JsFunctionInfo:
     name: str
     complexity: int
+    class_name: str | None = None
 
 
 @dataclass
 class JsFileReport:
     path: str
-    imports: list[str] = field(default_factory=list)  # raw specifiers: "./utils", "react", etc.
+    imports: list[str] = field(default_factory=list)
     functions: list[JsFunctionInfo] = field(default_factory=list)
+    classes: list[str] = field(default_factory=list)
     loc: int = 0
     parse_error: str | None = None
 
@@ -56,7 +52,7 @@ _BRANCH_NODE_TYPES = {
     "do_statement", "catch_clause", "switch_case", "ternary_expression",
     "conditional_expression",
 }
-_LOGICAL_OP_TYPE = "binary_expression"  # && / || nested inside these
+_LOGICAL_OP_TYPE = "binary_expression"
 
 
 def _count_complexity(node) -> int:
@@ -80,7 +76,6 @@ def _count_complexity(node) -> int:
 _FUNCTION_NODE_TYPES = {
     "function_declaration", "function_expression", "arrow_function", "method_definition",
 }
-_IMPORT_STRING_PARENTS = {"import_statement", "export_statement", "call_expression"}
 
 
 def parse_file(path: Path) -> JsFileReport:
@@ -106,15 +101,13 @@ def parse_file(path: Path) -> JsFileReport:
 
     root = tree.root_node
 
-    def walk(node, in_require_call=False):
-        # import ... from "spec"; export ... from "spec";
+    def walk(node, class_name=None):
         if node.type in ("import_statement", "export_statement"):
             for child in node.children:
                 if child.type == "string":
                     spec = child.text.decode("utf-8", errors="replace").strip("'\"")
                     report.imports.append(spec)
 
-        # require("spec")
         if node.type == "call_expression":
             fn = node.child_by_field_name("function")
             if fn and fn.text == b"require":
@@ -128,15 +121,24 @@ def parse_file(path: Path) -> JsFileReport:
         if node.type in _FUNCTION_NODE_TYPES:
             name_node = node.child_by_field_name("name")
             name = name_node.text.decode("utf-8") if name_node else "<anonymous>"
-            report.functions.append(JsFunctionInfo(name=name, complexity=_count_complexity(node)))
-            # don't recurse into nested functions for complexity counting purposes,
-            # but DO still walk them to find imports inside (rare, but possible)
+            report.functions.append(
+                JsFunctionInfo(name=name, complexity=_count_complexity(node), class_name=class_name)
+            )
             for child in node.children:
-                walk(child)
+                walk(child, class_name=class_name)
+            return
+
+        if node.type == "class_declaration":
+            name_node = node.child_by_field_name("name")
+            this_class = name_node.text.decode("utf-8") if name_node else None
+            if this_class:
+                report.classes.append(this_class)
+            for child in node.children:
+                walk(child, class_name=this_class)
             return
 
         for child in node.children:
-            walk(child)
+            walk(child, class_name=class_name)
 
     walk(root)
     return report
@@ -155,17 +157,3 @@ def parse_repo(repo_root: Path, ignore_dirs: set[str] | None = None) -> list[JsF
             continue
         reports.append(parse_file(path))
     return reports
-
-
-if __name__ == "__main__":
-    import sys
-
-    target = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
-    reports = parse_repo(target)
-    print(f"Parsed {len(reports)} JS/TS files under {target}")
-    errors = [r for r in reports if r.parse_error]
-    if errors:
-        print(f"  {len(errors)} files had errors")
-    total_funcs = sum(len(r.functions) for r in reports)
-    total_imports = sum(len(r.imports) for r in reports)
-    print(f"  {total_funcs} functions, {total_imports} import statements found")
