@@ -52,7 +52,7 @@ def analyze(req: AnalyzeRequest):
             detail=f"No supported files (.py, .js, .jsx, .ts, .tsx) found under {repo_root}.",
         )
 
-    debt = score_repo(repo_root, max_commits=req.max_commits, exclude_dirs=exclude_set)
+    debt = score_repo(repo_root, max_commits=req.max_commits, exclude_dirs=exclude_set, graph=graph)
 
     hotspot_by_path = {fs.path: fs for fs in debt.file_scores}
 

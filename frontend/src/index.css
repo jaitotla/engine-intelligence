@@ -104,6 +104,24 @@ body {
   margin-left: auto;
 }
 
+.export-btn {
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-left: 16px;
+  flex-shrink: 0;
+}
+
+.export-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .stat {
   padding: 0 16px;
   border-left: 1px solid var(--border);

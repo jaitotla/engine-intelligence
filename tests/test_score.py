@@ -8,6 +8,8 @@ Covers the three score.py bugs found while testing against real repos:
    into their own noisy sub-boundaries instead of collapsing together.
 """
 
+import score as score_module
+from dependency_graph import build_graph
 from score import _top_level_module, _is_test_pairing, _same_directory, score_repo
 from conftest import write_and_commit
 
@@ -55,3 +57,38 @@ def test_hotspot_score_is_complexity_times_churn(git_repo):
     assert risky.churn == 2
     assert risky.hotspot_score == risky.complexity * risky.churn
     assert risky.hotspot_score > 0
+
+
+def test_score_repo_skips_rebuild_when_graph_is_passed_in(git_repo, monkeypatch):
+    """Regression test for the double-parse performance bug found while
+    validating against Django (~2,900 files): the API used to call
+    build_graph() once itself, then score_repo() called it AGAIN
+    internally, silently doubling the most expensive part of the
+    pipeline. score_repo must reuse a graph it's handed instead of
+    rebuilding it."""
+    write_and_commit(git_repo, {"a.py": "import b\n", "b.py": "x = 1\n"})
+
+    call_count = {"n": 0}
+    real_build_graph = score_module.build_graph
+
+    def counting_build_graph(*args, **kwargs):
+        call_count["n"] += 1
+        return real_build_graph(*args, **kwargs)
+
+    monkeypatch.setattr(score_module, "build_graph", counting_build_graph)
+
+    # Caller builds the graph itself, exactly like the API does, then
+    # passes it in — build_graph should NOT be invoked again inside score_repo.
+    graph = counting_build_graph(git_repo)
+    assert call_count["n"] == 1
+
+    score_repo(git_repo, graph=graph)
+    assert call_count["n"] == 1, "score_repo must reuse the passed-in graph, not rebuild it"
+
+
+def test_score_repo_still_builds_graph_when_not_provided(git_repo):
+    """The default (no graph passed) path must keep working — most callers,
+    including every existing test in this file, rely on it."""
+    write_and_commit(git_repo, {"a.py": "x = 1\n"})
+    report = score_repo(git_repo)  # no graph= argument
+    assert any(fs.path == "a.py" for fs in report.file_scores)
