@@ -2,8 +2,13 @@
 Phase 4/5 backend.
 """
 
+import hashlib
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 import anthropic
@@ -21,25 +26,115 @@ from reading_order import compute_reading_order  # noqa: E402
 
 app = FastAPI(title="Engine Intelligence API")
 
+# In production (Render), set ALLOWED_ORIGINS to the deployed frontend's
+# URL, e.g. "https://engine-intelligence.vercel.app". Defaults cover local dev.
+_allowed_origins = os.environ.get(
+    "ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# --- GitHub URL cloning: lets the public demo analyze any repo, not just a
+# local path. Guardrails exist to keep the shared demo instance up, not to
+# limit cost (that's a separate, deliberate decision) — an oversized clone
+# or a runaway git process would degrade the demo for every visitor, not
+# just whoever triggered it.
+_CLONE_DIR = (Path(tempfile.gettempdir()) / "engine-intel-clones").resolve()
+_CLONE_DIR.mkdir(exist_ok=True)
+_MAX_CLONE_AGE_SECONDS = 2 * 60 * 60  # sweep clones older than this
+_MAX_SOURCE_FILES = 5000  # ~1.7x Django's ~2,900 — comfortably covers real repos
+_CLONE_TIMEOUT_SECONDS = 90
+_CLONE_DEPTH = 500
+
+_SOURCE_EXTENSIONS = {".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"}
+
+
+def _sweep_old_clones():
+    now = time.time()
+    for child in _CLONE_DIR.iterdir():
+        try:
+            if child.is_dir() and (now - child.stat().st_mtime) > _MAX_CLONE_AGE_SECONDS:
+                shutil.rmtree(child, ignore_errors=True)
+        except FileNotFoundError:
+            pass  # already removed by a concurrent request
+
+
+def _count_source_files(root: Path) -> int:
+    count = 0
+    for p in root.rglob("*"):
+        if p.suffix in _SOURCE_EXTENSIONS and p.is_file():
+            if "node_modules" in p.parts or ".git" in p.parts:
+                continue
+            count += 1
+    return count
+
+
+def _clone_github_repo(url: str) -> Path:
+    _sweep_old_clones()
+
+    url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
+    dest = _CLONE_DIR / url_hash
+
+    if dest.exists():
+        dest.touch()  # bump mtime so the sweep treats this clone as fresh
+        return dest
+
+    try:
+        subprocess.run(
+            ["git", "clone", "--depth", str(_CLONE_DEPTH), url, str(dest)],
+            check=True,
+            capture_output=True,
+            timeout=_CLONE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Clone timed out after {_CLONE_TIMEOUT_SECONDS}s — this repo may be too large for the live demo.",
+        )
+    except subprocess.CalledProcessError as e:
+        shutil.rmtree(dest, ignore_errors=True)
+        stderr = e.stderr.decode(errors="replace")[:300] if e.stderr else "unknown error"
+        raise HTTPException(status_code=400, detail=f"Could not clone repo: {stderr}")
+
+    # File-count guard runs AFTER the clone (there's no way to know a repo's
+    # file count before fetching it) but BEFORE the expensive parsing/git-log
+    # mining pass, so an oversized repo fails fast rather than burning
+    # server time on the shared instance.
+    file_count = _count_source_files(dest)
+    if file_count > _MAX_SOURCE_FILES:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"This repo has {file_count} source files, over the {_MAX_SOURCE_FILES}-file limit for the live demo. Try a smaller repo, or run this locally instead (see SETUP.md).",
+        )
+
+    return dest
+
 
 class AnalyzeRequest(BaseModel):
-    repo_path: str
-    max_commits: int = 2000
+    repo_path: str | None = None   # local path — used for local dev/testing (see SETUP.md)
+    github_url: str | None = None  # public repo URL — used by the live demo
+    max_commits: int = 500
     exclude_dirs: list[str] = []
 
 
 @app.post("/api/analyze")
 def analyze(req: AnalyzeRequest):
-    repo_root = Path(req.repo_path).expanduser().resolve()
-    if not repo_root.exists():
-        raise HTTPException(status_code=404, detail=f"Path not found: {repo_root}")
+    if req.github_url:
+        repo_root = _clone_github_repo(req.github_url)
+    elif req.repo_path:
+        repo_root = Path(req.repo_path).expanduser().resolve()
+        if not repo_root.exists():
+            raise HTTPException(status_code=404, detail=f"Path not found: {repo_root}")
+    else:
+        raise HTTPException(status_code=400, detail="Provide either repo_path or github_url")
+
     if not (repo_root / ".git").exists():
         raise HTTPException(status_code=400, detail=f"Not a git repository: {repo_root}")
 

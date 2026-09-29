@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import DependencyGraph from './DependencyGraph';
 import './index.css';
 
-const API_URL = 'http://localhost:8000';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 function riskDotColor(score, maxScore) {
   if (maxScore === 0) return 'var(--text-faint)';
@@ -99,10 +99,15 @@ export default function App() {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
+      const trimmedPath = repoPath.trim();
+      const isUrl = trimmedPath.startsWith('http://') || trimmedPath.startsWith('https://');
       const res = await fetch(`${API_URL}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo_path: repoPath, exclude_dirs: excludeList }),
+        body: JSON.stringify({
+          [isUrl ? 'github_url' : 'repo_path']: trimmedPath,
+          exclude_dirs: excludeList,
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.detail || 'Analysis failed');
@@ -116,17 +121,19 @@ export default function App() {
 
   const onSelect = useCallback((path) => {
     setSelectedPath(path);
-    setExplanation(null);
-    setExplainError(null);
   }, []);
 
-  // Auto-fetch file contents (Option A) whenever selection changes — covers
-  // every place a file gets selected (hotspot list, reading order, graph
-  // clicks, detail-panel cross-links), not just onSelect.
+  // Resets ALL per-file state whenever selection changes, regardless of
+  // which UI element triggered it — hotspot list, reading order, graph
+  // clicks, or detail-panel cross-links all just call setSelectedPath,
+  // so this must live here (keyed on selectedPath) rather than inside
+  // any one click handler, or state from the previous file lingers.
   useEffect(() => {
     setFileContents(null);
     setSummary(null);
     setSummarizeError(null);
+    setExplanation(null);
+    setExplainError(null);
     setShowAllDepends(false);
     setShowAllDependedOn(false);
     setShowAllContents(false);
@@ -323,7 +330,7 @@ export default function App() {
         <form onSubmit={handleAnalyze} className="analyze-form">
           <input
             type="text"
-            placeholder="/path/to/repo"
+            placeholder="GitHub URL or local path (e.g. https://github.com/psf/requests)"
             value={repoPath}
             onChange={(e) => setRepoPath(e.target.value)}
           />

@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+pydantic
+anthropic
+requests
+
+# Pinned deliberately: tree-sitter-languages (pre-built grammars) is not
+# compatible with tree-sitter >= 0.22's Language() API change and raises a
+# hard TypeError on import. This pin is a real, documented workaround, not
+# an arbitrary version choice.
+tree-sitter==0.21.3
+tree-sitter-languages
