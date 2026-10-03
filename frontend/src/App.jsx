@@ -71,7 +71,7 @@ export default function App() {
   const [explanation, setExplanation] = useState(null);
   const [explaining, setExplaining] = useState(false);
   const [explainError, setExplainError] = useState(null);
-  const [provider, setProvider] = useState('ollama');
+  const [provider, setProvider] = useState('anthropic');
   const [filterQuery, setFilterQuery] = useState('');
   const [sidebarTab, setSidebarTab] = useState('hotspots');
   const [fileContents, setFileContents] = useState(null);
